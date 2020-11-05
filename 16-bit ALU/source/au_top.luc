@@ -1,0 +1,2221 @@
+module au_top (
+    input clk,              // 100MHz clock
+    input rst_n,            // reset button (active low)
+    output led [8],         // 8 user controllable LEDs
+    input usb_rx,           // USB->Serial input
+    output usb_tx,          // USB->Serial output
+    output io_led [3][8],   // LEDs on IO Shield
+    output io_seg [8],      // 7-segment LEDs on IO Shield
+    output io_sel [4],      // Digit select on IO Shield
+    input io_button [5],    // 5 buttons on IO Shield
+    input io_dip [3][8]     // DIP switches on IO Shield
+  ) {
+  
+  sig rst;                  // reset signal
+  
+  .clk(clk) {
+    // The reset conditioner is used to synchronize the reset signal to the FPGA
+    // clock. This ensures the entire FPGA comes out of reset at the same time.
+    reset_conditioner reset_cond;
+    .rst(rst){
+      dff temp_a[16];
+      dff temp_b[16];
+      dff timera[30];
+      dff timerb[30];
+      dff timer[30];
+    
+      fsm state = {SELECT, MANUAL, TESTADD, TESTSUB1, TESTSUB2,
+      TESTOVERFLOW1, TESTOVERFLOW2, TESTOVERFLOW3,
+      TESTAND, TESTOR, TESTXOR, TESTA,
+      TESTSHL1, TESTSHL2, TESTSHR1, TESTSHR2, TESTSRA1, TESTSRA2,
+      TESTCMPEQ1, TESTCMPEQ2, TESTCMPLT1, TESTCMPLT2, TESTCMPLT3, TESTCMPLT4,
+      TESTCMPLE1, TESTCMPLE2, TESTCMPLE3, TESTCMPLE4, TESTCMPLE5, TESTMULT};
+    
+      multi_seven_seg seg;
+    } 
+  }
+  
+  sig a[16];
+  sig b[16];
+  sig alu[16];
+  
+  alu alu_comp;
+  
+  always {
+    reset_cond.in = ~rst_n; // input raw inverted reset signal
+    rst = reset_cond.out;   // conditioned reset
+    
+    usb_tx = usb_rx;        // loop serial port
+    
+    led = 8h00;             // turn LEDs off
+    
+    io_led = 3x{{8h00}};    // turn LEDs off
+    io_seg = 8hff;          // turn segments off
+    io_sel = 4hf;           // select no digits
+    
+    seg.values[3] = 4b0;
+    seg.values[2] = 4b0;
+    seg.values[1] = 4b0;
+    seg.values[0] = 4b0;
+    io_sel = ~4b0;
+    alu_comp.alufn = 6b0;
+    alu_comp.a = 16b0;
+    alu_comp.b = 16b0;
+    
+    case(state.q){
+      state.SELECT:
+        seg.values[3] = 5;
+        seg.values[2] = 14;
+        seg.values[1] = 13;
+        seg.values[0] = 31;
+        io_seg = ~seg.seg;
+        io_sel = ~seg.sel;
+        
+        if(io_dip[0][0]){
+          if(io_button[1]){
+            state.d = state.TESTADD;
+          }
+        } else {
+          if(io_button[1]){
+            state.d = state.MANUAL;
+          }
+        }
+  
+      state.MANUAL:                        //MANUAL MODE
+        seg.values[3] = 30;
+        seg.values[2] = 30;
+        seg.values[1] = 30;
+        seg.values[0] = 30;
+        io_seg = ~seg.seg;
+        io_sel = ~seg.sel;
+        
+        if(io_dip[0][1]){                  //store a
+          a[7:0] = io_dip[1];
+          a[15:8] = io_dip[2];
+          if(io_button[1]){
+            temp_a.d = a;
+          }
+        } else {                           //store b
+          b[7:0] = io_dip[1];
+          b[15:8] = io_dip[2];
+          if(io_button[1]){
+            temp_b.d = b;
+          }
+        }
+        
+        if(io_button[0]){
+          temp_a.d = 0;
+          temp_b.d = 0;
+        }
+          
+        alu_comp.alufn = io_dip[0][7:2];
+        alu_comp.a = temp_a.q;
+        alu_comp.b = temp_b.q;
+    
+        io_led[1] = alu_comp.alu[7:0];
+        io_led[2] = alu_comp.alu[15:8];
+        io_led[0][0] = alu_comp.z;
+        io_led[0][1] = alu_comp.v;
+        io_led[0][2] = alu_comp.n;
+        
+        if(io_button[2]){
+          state.d = state.SELECT;
+        }
+      
+      state.TESTADD:                       //ADDITION TEST
+        alu_comp.alufn = 6b0;              //alufn input
+        a = 16b0101011110101010;           //a input
+        alu_comp.a = a;
+        b = 16b0010000100100100;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 10;
+          seg.values[2] = 11;
+          seg.values[1] = 11;
+          seg.values[0] = 31;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] = 1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 10;
+          seg.values[2] = 11;
+          seg.values[1] = 11;
+          seg.values[0] = 31;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu == 16b0111100011001110){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+            
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTSUB1;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+
+      state.TESTSUB1:                      //SUBTRACTION TEST 1
+        alu_comp.alufn = 6b000001;         //alufn input
+        a = 16b1100000000110000;           //a input
+        alu_comp.a = a;
+        b = 16b0000110010001011;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 5;
+          seg.values[2] = 15;
+          seg.values[1] = 16;
+          seg.values[0] = 1;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 5;
+          seg.values[2] = 15;
+          seg.values[1] = 16;
+          seg.values[0] = 1;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu == 16b1011001110100101 & alu_comp.n == 1){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTSUB2;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTSUB2:                      //SUBTRACTION TEST 2
+        alu_comp.alufn = 6b000001;         //alufn input
+        a = 16b1111111111111101;           //a input
+        alu_comp.a = a;
+        b = 16b0000000000000111;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 5;
+          seg.values[2] = 15;
+          seg.values[1] = 16;
+          seg.values[0] = 2;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 5;
+          seg.values[2] = 15;
+          seg.values[1] = 16;
+          seg.values[0] = 2;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu == 16b1111111111110110 & alu_comp.n == 1){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTOVERFLOW1;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTOVERFLOW1:                      //OVERFLOW TEST 1
+        alu_comp.alufn = 6b000000;         //alufn input
+        a = 16b0111111111111111;           //a input
+        alu_comp.a = a;
+        b = 16b0111111111111111;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 12;
+          seg.values[2] = 13;
+          seg.values[1] = 0;
+          seg.values[0] = 1;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 12;
+          seg.values[2] = 13;
+          seg.values[1] = 0;
+          seg.values[0] = 1;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu == 16b1111111111111110 & alu_comp.n == 1 & alu_comp.v == 1){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTOVERFLOW2;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTOVERFLOW2:                      //OVERFLOW TEST 2
+        alu_comp.alufn = 6b000001;         //alufn input
+        a = 16b0110000110101000;           //a input
+        alu_comp.a = a;
+        b = 16b1100000110000000;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 12;
+          seg.values[2] = 13;
+          seg.values[1] = 0;
+          seg.values[0] = 2;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 12;
+          seg.values[2] = 13;
+          seg.values[1] = 0;
+          seg.values[0] = 2;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu == 16b1010000000101000 & alu_comp.n == 1 & alu_comp.v == 1){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTOVERFLOW3;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTOVERFLOW3:                      //OVERFLOW TEST 3
+        alu_comp.alufn = 6b000000;         //alufn input
+        a = 16b1001111001011000;           //a input
+        alu_comp.a = a;
+        b = 16b1100000110000000;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 12;
+          seg.values[2] = 13;
+          seg.values[1] = 0;
+          seg.values[0] = 3;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 12;
+          seg.values[2] = 13;
+          seg.values[1] = 0;
+          seg.values[0] = 3;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu == 16b0101111111011000 & alu_comp.v == 1){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTAND;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTAND:                      //AND TEST
+        alu_comp.alufn = 6b011000;         //alufn input
+        a = 16b0000111110100001;           //a input
+        alu_comp.a = a;
+        b = 16b1001111100001000;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 10;
+          seg.values[2] = 18;
+          seg.values[1] = 11;
+          seg.values[0] = 31;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 10;
+          seg.values[2] = 18;
+          seg.values[1] = 11;
+          seg.values[0] = 31;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1001;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu == 16b0000111100000000){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTOR;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTOR:                      //OR TEST
+        alu_comp.alufn = 6b011110;         //alufn input
+        a = 16b0000111110100001;           //a input
+        alu_comp.a = a;
+        b = 16b1001111100001000;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 0;
+          seg.values[2] = 19;
+          seg.values[1] = 31;
+          seg.values[0] = 31;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 0;
+          seg.values[2] = 19;
+          seg.values[1] = 31;
+          seg.values[0] = 31;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu == 16b1001111110101001){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTXOR;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTXOR:                      //XOR TEST
+        alu_comp.alufn = 6b010110;         //alufn input
+        a = 16b0000111110100001;           //a input
+        alu_comp.a = a;
+        b = 16b1001111100001000;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 30;
+          seg.values[2] = 0;
+          seg.values[1] = 19;
+          seg.values[0] = 31;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 30;
+          seg.values[2] = 0;
+          seg.values[1] = 19;
+          seg.values[0] = 31;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu == 16b1001000010101001){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTA;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTA:                      //A TEST
+        alu_comp.alufn = 6b011010;         //alufn input
+        a = 16b0000111110100001;           //a input
+        alu_comp.a = a;
+        b = 16b1001111100001000;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 10;
+          seg.values[2] = 31;
+          seg.values[1] = 31;
+          seg.values[0] = 31;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 10;
+          seg.values[2] = 31;
+          seg.values[1] = 31;
+          seg.values[0] = 31;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu == 16b0000111110100001){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTSHL1;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTSHL1:                      //SHL TEST 1
+        alu_comp.alufn = 6b100000;         //alufn input
+        a = 16b0001100001000010;           //a input
+        alu_comp.a = a;
+        b = 16b0000000000100011;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 5;
+          seg.values[2] = 20;
+          seg.values[1] = 13;
+          seg.values[0] = 1;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 5;
+          seg.values[2] = 20;
+          seg.values[1] = 13;
+          seg.values[0] = 1;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu == 16b1100001000010000){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTSHL2;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTSHL2:                      //SHL TEST 2
+        alu_comp.alufn = 6b100000;         //alufn input
+        a = 16b0100100001101100;           //a input
+        alu_comp.a = a;
+        b = 16b0000000000000100;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 5;
+          seg.values[2] = 20;
+          seg.values[1] = 13;
+          seg.values[0] = 2;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 5;
+          seg.values[2] = 20;
+          seg.values[1] = 13;
+          seg.values[0] = 2;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu == 16b1000011011000000){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTSHR1;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTSHR1:                      //SHR TEST 1
+        alu_comp.alufn = 6b100001;         //alufn input
+        a = 16b0110110011110000;           //a input
+        alu_comp.a = a;
+        b = 16b0000000000000110;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 5;
+          seg.values[2] = 20;
+          seg.values[1] = 19;
+          seg.values[0] = 1;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 5;
+          seg.values[2] = 20;
+          seg.values[1] = 19;
+          seg.values[0] = 1;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 16b1000000000000000;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu == 16b0000000110110011){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTSHR2;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTSHR2:                      //SHR TEST 2
+        alu_comp.alufn = 6b100001;         //alufn input
+        a = 16b1001010011100010;           //a input
+        alu_comp.a = a;
+        b = 16b0000000000001111;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 5;
+          seg.values[2] = 20;
+          seg.values[1] = 19;
+          seg.values[0] = 2;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 5;
+          seg.values[2] = 20;
+          seg.values[1] = 19;
+          seg.values[0] = 2;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 16b1000000000000000;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu == 16b0000000000000001){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTSRA1;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTSRA1:                      //SRA TEST 1
+        alu_comp.alufn = 6b100011;         //alufn input
+        a = 16b1100100001100001;           //a input
+        alu_comp.a = a;
+        b = 16b0000000000001100;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 5;
+          seg.values[2] = 19;
+          seg.values[1] = 10;
+          seg.values[0] = 1;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 5;
+          seg.values[2] = 19;
+          seg.values[1] = 10;
+          seg.values[0] = 1;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 16b1000000000000000;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu == 16b1111111111111100){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTSRA2;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTSRA2:                      //SRA TEST 2
+        alu_comp.alufn = 6b100011;         //alufn input
+        a = 16b0100100001100001;           //a input
+        alu_comp.a = a;
+        b = 16b0000000000001100;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 5;
+          seg.values[2] = 19;
+          seg.values[1] = 10;
+          seg.values[0] = 2;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 5;
+          seg.values[2] = 19;
+          seg.values[1] = 10;
+          seg.values[0] = 2;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 16b1000000000000000;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu == 16b0000000000000100){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTCMPEQ1;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTCMPEQ1:                      //CMPEQ TEST 1
+        alu_comp.alufn = 6b110011;         //alufn input
+        a = 16b1001100010111000;           //a input
+        alu_comp.a = a;
+        b = 16b1001100010111000;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 17;
+          seg.values[1] = 14;
+          seg.values[0] = 1;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 17;
+          seg.values[1] = 14;
+          seg.values[0] = 1;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1001;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu[0] == 1 & alu_comp.z == 1 & alu_comp.v == 0 & alu_comp.n == 0){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTCMPEQ2;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTCMPEQ2:                      //CMPEQ TEST 2
+        alu_comp.alufn = 6b110011;         //alufn input
+        a = 16b0000000000110101;           //a input
+        alu_comp.a = a;
+        b = 16b0000000000000110;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 17;
+          seg.values[1] = 14;
+          seg.values[0] = 2;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 17;
+          seg.values[1] = 14;
+          seg.values[0] = 2;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 16b1000000000000000;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu[0] == 0 & alu_comp.z == 0 & alu_comp.v == 0 & alu_comp.n == 0){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTCMPLT1;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+       state.TESTCMPLT1:                      //CMPLT TEST 1
+        alu_comp.alufn = 6b110101;         //alufn input
+        a = 16b0100000100100111;           //a input
+        alu_comp.a = a;
+        b = 16b0000111111001001;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 17;
+          seg.values[1] = 13;
+          seg.values[0] = 1;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 17;
+          seg.values[1] = 13;
+          seg.values[0] = 1;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 16b1000000000000000;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu[0] == 0 & alu_comp.z == 0 & alu_comp.v == 0 & alu_comp.n == 0){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTCMPLT2;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTCMPLT2:                      //CMPLT TEST 2
+        alu_comp.alufn = 6b110101;         //alufn input
+        a = 16b1000000000000000;           //a input
+        alu_comp.a = a;
+        b = 16b0000000100100100;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 17;
+          seg.values[1] = 13;
+          seg.values[0] = 2;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 17;
+          seg.values[1] = 13;
+          seg.values[0] = 2;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1001;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu[0] == 1 & alu_comp.z == 0 & alu_comp.v == 1 & alu_comp.n == 0){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTCMPLT3;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTCMPLT3:                      //CMPLT TEST 3
+        alu_comp.alufn = 6b110101;         //alufn input
+        a = 16b1000000000000000;           //a input
+        alu_comp.a = a;
+        b = 16b1111000100100100;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 17;
+          seg.values[1] = 13;
+          seg.values[0] = 3;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 17;
+          seg.values[1] = 13;
+          seg.values[0] = 3;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 16b1000000000000000;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu[0] == 1 & alu_comp.z == 0 & alu_comp.v == 0 & alu_comp.n == 1){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTCMPLT4;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTCMPLT4:                      //CMPLT TEST 4
+        alu_comp.alufn = 6b110101;         //alufn input
+        a = 16b0111111111111111;           //a input
+        alu_comp.a = a;
+        b = 16b1000111111001001;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 17;
+          seg.values[1] = 13;
+          seg.values[0] = 4;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 17;
+          seg.values[1] = 13;
+          seg.values[0] = 4;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1001;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu[0] == 0 & alu_comp.z == 0 & alu_comp.v == 1 & alu_comp.n == 1){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTCMPLE1;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTCMPLE1:                      //CMPLE TEST 1
+        alu_comp.alufn = 6b110111;         //alufn input
+        a = 16b1111000100100111;           //a input
+        alu_comp.a = a;
+        b = 16b1000111111001001;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 13;
+          seg.values[1] = 14;
+          seg.values[0] = 1;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 13;
+          seg.values[1] = 14;
+          seg.values[0] = 1;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 16b1000000000000000;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu[0] == 0 & alu_comp.z == 0 & alu_comp.v == 0 & alu_comp.n == 0){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTCMPLE2;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTCMPLE2:                      //CMPLE TEST 2
+        alu_comp.alufn = 6b110111;         //alufn input
+        a = 16b0111111111111111;           //a input
+        alu_comp.a = a;
+        b = 16b1000111111001001;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 13;
+          seg.values[1] = 14;
+          seg.values[0] = 2;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 13;
+          seg.values[1] = 14;
+          seg.values[0] = 2;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1001;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu[0] == 0 & alu_comp.z == 0 & alu_comp.v == 1 & alu_comp.n == 1){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTCMPLE3;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTCMPLE3:                      //CMPLE TEST 3
+        alu_comp.alufn = 6b110111;         //alufn input
+        a = 16b0001001001001000;           //a input
+        alu_comp.a = a;
+        b = 16b0001001001001000;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 13;
+          seg.values[1] = 14;
+          seg.values[0] = 3;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 13;
+          seg.values[1] = 14;
+          seg.values[0] = 3;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1001;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu[0] == 1 & alu_comp.z == 1 & alu_comp.v == 0 & alu_comp.n == 0){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTCMPLE4;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTCMPLE4:                      //CMPLE TEST 4
+        alu_comp.alufn = 6b110111;         //alufn input
+        a = 16b1000000000000000;           //a input
+        alu_comp.a = a;
+        b = 16b1111000100100100;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 13;
+          seg.values[1] = 14;
+          seg.values[0] = 4;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 13;
+          seg.values[1] = 14;
+          seg.values[0] = 4;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 16b1000000000000000;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu[0] == 1 & alu_comp.z == 0 & alu_comp.v == 0 & alu_comp.n == 1){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTCMPLE5;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTCMPLE5:                      //CMPLE TEST 5
+        alu_comp.alufn = 6b110111;         //alufn input
+        a = 16b1000000000000000;           //a input
+        alu_comp.a = a;
+        b = 16b0000000100100100;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 13;
+          seg.values[1] = 14;
+          seg.values[0] = 5;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 21;
+          seg.values[2] = 13;
+          seg.values[1] = 14;
+          seg.values[0] = 5;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1001;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu[0] == 1 & alu_comp.z == 0 & alu_comp.v == 1 & alu_comp.n == 0){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.TESTMULT;                  //next state
+        }
+        if(io_button[2]){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                    //reset state to SELECT
+        }
+        
+      state.TESTMULT:                      //MULT TEST
+        alu_comp.alufn = 6b000010;         //alufn input
+        a = 16b0000000010100110;           //a input
+        alu_comp.a = a;
+        b = 16b0000000000010110;           //b input
+        alu_comp.b = b;
+        alu = alu_comp.alu;                //alu output
+        
+        if(timera.q[27]){
+          io_led[0][7] = 1;
+          io_led[1] = b[7:0];
+          io_led[2] = b[15:8];
+          timerb.d =timerb.q + 1;
+          seg.values[3] = 22;
+          seg.values[2] = 22;
+          seg.values[1] = 23;
+          seg.values[0] = 13;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        } else {
+        io_led[0][6] =1;
+          io_led[1] = a[7:0];
+          io_led[2] = a[15:8];
+          timera.d = timera.q + 1;
+          seg.values[3] = 22;
+          seg.values[2] = 22;
+          seg.values[1] = 23;
+          seg.values[0] = 13;
+          io_seg = ~seg.seg;
+          io_sel = ~seg.sel;
+        }
+        
+        if(timerb.q[27]){
+          io_led[0][7] = 0;
+          timer.d = timer.q + 1;
+          if(io_dip[0][7]){
+            alu_comp.a = a + 1;
+          }
+          
+          io_led[1] = alu[7:0];
+          io_led[2] = alu[15:8];
+          io_led[0][0] = alu_comp.z;
+          io_led[0][1] = alu_comp.v;
+          io_led[0][2] = alu_comp.n;
+          
+          if(alu == 16b0000111001000100){   //output checker
+            seg.values[3] = 17;
+            seg.values[2] = 10;
+            seg.values[1] = 5;
+            seg.values[0] = 5;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          } else {
+            seg.values[3] = 12;
+            seg.values[2] = 10;
+            seg.values[1] = 1;
+            seg.values[0] = 13;
+            io_seg = ~seg.seg;
+            io_sel = ~seg.sel;
+          }
+        }
+        
+        if(io_button[2] || timer.q[27] == 1){
+          timer.d = 0;
+          timera.d = 0;
+          timerb.d = 0;
+          state.d = state.SELECT;                  //returns to SELECT state
+        }
+      
+   }
+}
