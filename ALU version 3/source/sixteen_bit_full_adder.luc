@@ -1,0 +1,37 @@
+module sixteen_bit_full_adder(
+    input a[16],
+    input b[16],
+    input alufn[6],
+    
+    output s[16],
+    output z,
+    output v,
+    output n
+  ) {
+ 
+  sig xb[16], ss[16];
+  
+  full_adder adder[16];  
+  
+  always {
+    
+    xb = b ^ 16x{alufn[0]};                //check for subtraction
+    
+    adder.x = a;
+    adder.y = xb;
+    adder.cin[0] = alufn[0];
+    adder.cin[15:1] = adder.cout[14:0];
+    ss = adder.s;
+    s = ss;
+    
+    //compute z
+    z = ~(ss[0]|ss[1]|ss[2]|ss[3]|ss[4]|ss[5]|ss[6]|ss[7]|ss[8]|ss[9]|ss[10]|ss[11]|ss[12]|ss[13]|ss[14]|ss[15]);
+    
+    //compute v
+    v = (a[15] & xb[15] & ~ss[15]) | (~a[15] & ~xb[15] & ss[15]);
+    
+    //compute n
+    n = ss[15];
+    
+  }
+}

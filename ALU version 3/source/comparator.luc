@@ -1,0 +1,30 @@
+module comparator (
+    input alufn[6],
+    input z,
+    input v,
+    input n,
+    
+    output cmp[16]
+  ) {
+  
+sig vxorn;
+sig vxorn_orz;
+  
+  always {
+    cmp[15:1] = 15b0;
+    vxorn = v ^ n;
+    vxorn_orz = vxorn | z;
+    case(alufn[2:1]){
+      b00:                               //default 0
+        cmp[0] = b0;
+      b01:                               //v xor n
+        cmp[0] = vxorn;
+      b10:                               //z
+        cmp[0] = z;
+      b11:                               // (v xor n) or z
+        cmp[0] = vxorn_orz;
+      default:
+        cmp[0] = 0;
+    }
+  }
+}

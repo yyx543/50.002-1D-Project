@@ -1,0 +1,12 @@
+#-----------------------------------------------------------
+# Vivado v2020.1 (64-bit)
+# SW Build 2902540 on Wed May 27 19:54:49 MDT 2020
+# IP Build 2902112 on Wed May 27 22:43:36 MDT 2020
+# Start of session at: Thu Nov  5 16:41:31 2020
+# Process ID: 13220
+# Current directory: C:/Users/Yi Xian/Desktop/50.002/1D/ALU version 3/work/vivado/ALU version 3/ALU version 3.runs/synth_1
+# Command line: vivado.exe -log au_top_0.vds -product Vivado -mode batch -messageDb vivado.pb -notrace -source au_top_0.tcl
+# Log file: C:/Users/Yi Xian/Desktop/50.002/1D/ALU version 3/work/vivado/ALU version 3/ALU version 3.runs/synth_1/au_top_0.vds
+# Journal file: C:/Users/Yi Xian/Desktop/50.002/1D/ALU version 3/work/vivado/ALU version 3/ALU version 3.runs/synth_1\vivado.jou
+#-----------------------------------------------------------
+source au_top_0.tcl -notrace

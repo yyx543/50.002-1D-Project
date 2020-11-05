@@ -1,0 +1,28 @@
+module boolean (
+    input alufn[6],
+    input a[16],
+    input b[16],
+
+    output boole[16]
+  ) {
+  
+var x, y;
+  
+  always {
+    for(x=0; x<16;x++){
+  
+      y = c{b[x],a[x]};
+    
+      case(y){                        //following alufn[3:0] boolean
+        b00:
+          boole[x]= alufn[0];
+        b01:
+          boole[x] = alufn[1];
+        b10:
+          boole[x] = alufn[2];
+        b11:
+          boole[x] = alufn[3];
+        default:
+          boole[x] = alufn[0];
+  }
+}

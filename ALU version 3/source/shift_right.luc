@@ -1,0 +1,58 @@
+module shift_right (
+    input a[16],
+    input b[4],
+    input alufn1,
+
+    output right[16]
+  ) {
+  
+sig x[16];
+sig y[16];
+sig z[16];
+sig msb;  
+  
+  always {
+  
+    msb = a[15] & alufn1;         //determine whether shift right or shift right arithmetic
+    
+    case(b[0]){                   //shift right by 1
+      b0:
+        x = a;
+      b1:
+        x[14:0] = a[15:1];
+        x[15] = msb;
+      default:
+        x = a;
+    }
+    
+    case(b[1]){                   //shift right by 2
+      b0:
+        y = x;
+      b1:
+        y[13:0] = x[15:2];
+        y[15:14] = 2x{msb};
+      default:
+        y = x;
+    }
+    
+    case(b[2]){                   //shift right by 4
+      b0:
+        z = y;
+      b1:
+        z[11:0] = y[15:4];
+        z[15:12] = 4x{msb};
+      default:
+        z = y;
+    }
+    
+    case(b[3]){                   //shift right by 8
+      b0:
+        right = z;
+      b1:
+        right[7:0] = z[15:8];
+        right[15:8] = 8x{msb};
+      default:
+        right = z;
+    }
+  }
+}

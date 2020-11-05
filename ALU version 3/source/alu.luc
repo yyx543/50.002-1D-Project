@@ -1,0 +1,76 @@
+module alu (
+    input alufn[6],
+    input a[16],
+    input b[16],
+    
+    output z,
+    output v,
+    output n,
+    output alu[16]
+  ) {
+
+comparator compare;
+sixteen_bit_full_adder adder;
+boolean boolean;
+shifter shifter;
+multiplier mult;
+  
+  always {
+  
+    //adder input
+    adder.a = a;
+    adder.b = b;
+    adder.alufn = alufn;
+    
+    //comparator input
+    compare.z = adder.z;
+    compare.v = adder.v;
+    compare.n = adder.n;
+    compare.alufn = alufn;
+    
+    //boolean input
+    boolean.a = a;
+    boolean.b = b;
+    boolean.alufn = alufn;
+    
+    //shifter input
+    shifter.a = a;
+    shifter.b = b[3:0];
+    shifter.alufn = alufn;
+    
+    //multiplier input
+    mult.a = a;
+    mult.b = b;
+    
+    //mux to choose alu output
+    case(alufn[5:4]){
+      b00:
+        case(alufn[1]){        //mux to choose between multiplier and adder
+          b0:                  //adder output
+            alu = adder.s;
+          b1:                  //multiplier output
+            alu = mult.p;
+          default:
+            alu = adder.s;
+        }
+      b01:                     //boolean output
+        alu = boolean.boole;
+      b10:                     //shifter output
+        alu = shifter.shift;
+      b11:                     //comparator output
+        alu = compare.cmp;
+      default:
+        case(alufn[1]){
+          b0:
+            alu = adder.s;
+          b1:
+            alu = mult.p;
+          default:
+            alu = adder.s;
+        }
+    }
+    z = adder.z;
+    v = adder.v;
+    n = adder.n;
+  }
+}

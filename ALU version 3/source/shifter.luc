@@ -1,0 +1,32 @@
+module shifter (
+    input alufn[6],
+    input a[16],
+    input b[4],
+
+    output shift[16]
+  ) {
+  
+shift_left shiftleft;
+shift_right shiftright;
+  
+  always {
+  
+    //input for shift left
+    shiftleft.a = a;
+    shiftleft.b = b;
+    
+    //input for shift right
+    shiftright.a = a;
+    shiftright.b = b;
+    shiftright.alufn1 = alufn[1];
+    
+    case(alufn[0]){
+      b0:                             //choose shift left
+        shift = shiftleft.left;
+      b1:                             //choose shift right
+        shift = shiftright.right;
+      default:
+        shift = shiftleft.left;
+    }
+  }
+}
